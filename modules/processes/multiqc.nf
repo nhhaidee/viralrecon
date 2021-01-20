@@ -36,25 +36,24 @@ process MULTIQC {
     path ('bcftools/variants/bcftools/*') /*from ch_bcftools_variants_mqc.collect().ifEmpty([])*/
     path ('bcftools/variants/snpeff/*') /*from ch_bcftools_snpeff_mqc.collect().ifEmpty([])*/
     path ('bcftools/consensus/quast/*') /*from ch_bcftools_quast_mqc.collect().ifEmpty([])*/
-    /*
-    path ('cutadapt/log/*') from ch_cutadapt_mqc.collect().ifEmpty([])
-    path ('cutadapt/fastqc/*') from ch_cutadapt_fastqc_mqc.collect().ifEmpty([])
-    path ('kraken2/*') from ch_kraken2_report_mqc.collect().ifEmpty([])
-    path ('spades/bcftools/*') from ch_spades_vg_bcftools_mqc.collect().ifEmpty([])
-    path ('spades/snpeff/*') from ch_spades_snpeff_mqc.collect().ifEmpty([])
-    path ('spades/quast/*') from ch_quast_spades_mqc.collect().ifEmpty([])
-    path ('metaspades/bcftools/*') from ch_metaspades_vg_bcftools_mqc.collect().ifEmpty([])
-    path ('metaspades/snpeff/*') from ch_metaspades_snpeff_mqc.collect().ifEmpty([])
-    path ('metaspades/quast/*') from ch_quast_metaspades_mqc.collect().ifEmpty([])
-    path ('unicycler/bcftools/*') from ch_unicycler_vg_bcftools_mqc.collect().ifEmpty([])
-    path ('unicycler/snpeff/*') from ch_unicycler_snpeff_mqc.collect().ifEmpty([])
-    path ('unicycler/quast/*') from ch_quast_unicycler_mqc.collect().ifEmpty([])
-    path ('minia/bcftools/*') from ch_minia_vg_bcftools_mqc.collect().ifEmpty([])
-    path ('minia/snpeff/*') from ch_minia_snpeff_mqc.collect().ifEmpty([])
-    path ('minia/quast/*') from ch_quast_minia_mqc.collect().ifEmpty([])
-    path ('software_versions/*') from ch_software_versions_yaml.collect()
-    path workflow_summary from ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
-    */
+    path ('cutadapt/log/*')
+    path ('cutadapt/fastqc/*') 
+    path ('kraken2/*') /*from ch_kraken2_report_mqc.collect().ifEmpty([])*/
+    path ('spades/bcftools/*') //from ch_spades_vg_bcftools_mqc.collect().ifEmpty([])
+    path ('spades/snpeff/*') //from ch_spades_snpeff_mqc.collect().ifEmpty([])
+    path ('spades/quast/*') //from ch_quast_spades_mqc.collect().ifEmpty([])
+    path ('metaspades/bcftools/*') //from ch_metaspades_vg_bcftools_mqc.collect().ifEmpty([])
+    path ('metaspades/snpeff/*') //from ch_metaspades_snpeff_mqc.collect().ifEmpty([])
+    path ('metaspades/quast/*') //from ch_quast_metaspades_mqc.collect().ifEmpty([])
+    path ('unicycler/bcftools/*') //from ch_unicycler_vg_bcftools_mqc.collect().ifEmpty([])
+    path ('unicycler/snpeff/*') //from ch_unicycler_snpeff_mqc.collect().ifEmpty([])
+    path ('unicycler/quast/*') //from ch_quast_unicycler_mqc.collect().ifEmpty([])
+    path ('minia/bcftools/*') //from ch_minia_vg_bcftools_mqc.collect().ifEmpty([])
+    path ('minia/snpeff/*') //from ch_minia_snpeff_mqc.collect().ifEmpty([])
+    path ('minia/quast/*') //from ch_quast_minia_mqc.collect().ifEmpty([])
+    path ('software_versions/*') //from ch_software_versions_yaml.collect()
+    path workflow_summary //from ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
+    
     output:
     path "*multiqc_report.html",emit: ch_multiqc_report
     path "*_data"

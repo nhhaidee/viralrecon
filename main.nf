@@ -13,7 +13,7 @@ nextflow.enable.dsl=2
 include { helpMessage; checkHostname; nfcoreHeader;
           isOffline;
           validate_sample_sheet;
-          CheckFasta} from './lib/helpers';
+          check_mapped } from './lib/helpers';
 
 // Show help message
 if (params.help) {
@@ -24,16 +24,13 @@ if (params.help) {
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 /* --                                                                     -- */
-/* --                SET UP CONFIGURATION VARIABLES                       -- */
+/* --                        INCLUDE PROCESSES                            -- */
 /* --                                                                     -- */
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
-include { GUNZIP_FASTA; 
-          GUNZIP_GFF; 
-          UNTAR_KRAKEN2_DB; 
-          CHECK_SAMPLESHEET;
-          MAKE_BLAST_DB } from './modules/processes/preprocessing'
+
+include { GUNZIP_FASTA; GUNZIP_GFF; UNTAR_KRAKEN2_DB; CHECK_SAMPLESHEET; MAKE_BLAST_DB } from './modules/processes/preprocessing'
 include { SRA_FASTQ_FTP; SRA_FASTQ_DUMP } from './modules/processes/downloadfiles'
 include { CAT_FASTQ; FASTQC } from './modules/processes/fastqc'
 include { FASTP } from './modules/processes/adaptertrimming'
@@ -48,16 +45,30 @@ include { MOSDEPTH_GENOME; MOSDEPTH_AMPLICON; MOSDEPTH_AMPLICON_PLOT } from './m
 include { VARSCAN2; VARSCAN2_CONSENSUS; VARSCAN2_SNPEFF; VARSCAN2_QUAST } from './modules/processes/varscan'
 include { BCFTOOLS_ISEC } from './modules/processes/intersect_ivar_bcf'
 include { CUTADAPT } from './modules/processes/cutadapt'
-include { KRAKEN2 } from './modules/processes/kraken2'
-include { SPADES; SPADES_BLAST; SPADES_ABACAS } from './modules/processes/spades'
+include { KRAKEN2; KRAKEN2_BUILD } from './modules/processes/kraken2'
+include { SPADES; SPADES_BLAST; SPADES_ABACAS; SPADES_PLASMIDID; SPADES_QUAST; SPADES_VG; SPADES_SNPEFF } from './modules/processes/spades'
+include { METASPADES; METASPADES_BLAST; METASPADES_ABACAS; METASPADES_PLASMIDID; METASPADES_QUAST; METASPADES_VG; METASPADES_SNPEFF } from './modules/processes/metaspades'
+include { UNICYCLER; UNICYCLER_BLAST; UNICYCLER_ABACAS; UNICYCLER_PLASMIDID; UNICYCLER_QUAST; UNICYCLER_VG; UNICYCLER_SNPEFF } from './modules/processes/unicycler'
+include { MINIA; MINIA_BLAST; MINIA_ABACAS; MINIA_PLASMIDID; MINIA_QUAST; MINIA_VG; MINIA_SNPEFF } from './modules/processes/minia'
 include { MULTIQC } from './modules/processes/multiqc'
 include { FGBIO_TRIM_PRIMERS } from './modules/processes/primertrimming'
 
 
-    // Has the run name been specified by the user?
-    // this has the bonus effect of catching both -name and --name
+
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+/* --                                                                     -- */
+/* --                   THE VIRALRECON WORKFLOW                           -- */
+/* --                                                                     -- */
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
+
+    
 workflow {
 
+    // Has the run name been specified by the user?
+    // this has the bonus effect of catching both -name and --name
     custom_runName = params.name
     if (!(workflow.runName ==~ /[a-z]+_[a-z]+/)) {
         custom_runName = workflow.runName
@@ -69,7 +80,7 @@ workflow {
 
     if (params.input) { sample_sheet_file = file(params.input, checkIfExists: true) } else { exit 1, "Input samplesheet file not specified!" }
 
-    if (params.trim_primer) { ch_primer_info = file(params.primer_info, checkIfExists: true) } else { exit 1, "Primer Infor file not specified!" }
+    if (params.trim_primer) { ch_primer_info = file(params.primer_info, checkIfExists: true) }
 
     if (params.protocol != 'metagenomic' && params.protocol != 'amplicon') {
         exit 1, "Invalid protocol option: ${params.protocol}. Valid options: 'metagenomic' or 'amplicon'!"
@@ -328,14 +339,15 @@ workflow {
     * PREPROCESSING: Reformat samplesheet and check validity
     */
 
-    ch_input = Channel.from(sample_sheet_file) \
-            | CHECK_SAMPLESHEET \
-            | splitCsv(header:true, sep:',')
-            | map { validate_sample_sheet(it) }
+    ch_input = Channel.from(sample_sheet_file) 
+                | CHECK_SAMPLESHEET 
+                | splitCsv(header:true, sep:',') 
+                | map { validate_sample_sheet(it) }
 
     ch_reads_all = ch_input | map { it } 
     ch_reads_sra = ch_input | map { it }
-
+    //ch_reads_all.view{"ch_reads_all: " + it}
+    //ch_reads_sra.view{"ch_reads_sra: " + it}
     /*
     * STEP 1: Download and check SRA data
     */
@@ -364,7 +376,7 @@ workflow {
     * STEP 2: Merge FastQ files with the same sample identifier
     */
 
-    ch_reads_all | CAT_FASTQ // emit ch_cat_fastqc and ch_cat_fastp
+    ch_reads_all | CAT_FASTQ
 
     ///////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////
@@ -431,7 +443,7 @@ workflow {
     /*
     * STEP 5.1: Map read(s) with Bowtie 2
     */
-    FASTP.out.ch_fastp.combine(BOWTIE2_INDEX.out.ch_index)
+
     if (!params.skip_adapter_trimming){ 
         ch_bowtie2_align = FASTP.out.ch_fastp.combine(BOWTIE2_INDEX.out.ch_index)
         BOWTIE2 (ch_bowtie2_align, index_base)
@@ -445,10 +457,6 @@ workflow {
     Add Primer Trimming Step using FGBIO
     */
     if (params.trim_primer){
-
-        /*
-        Perform FGBIO Trim Primer
-        */
         FGBIO_TRIM_PRIMERS(ch_primer_info, BOWTIE2.out.ch_bowtie2_bam)
     }
     
@@ -461,35 +469,70 @@ workflow {
     else{
         SORT_BAM(BOWTIE2.out.ch_bowtie2_bam)
     }
-
-
-    //////// Remove samples that failed mapped read threshold (later) ///////
-
+    //Remove samples that failed mapped read threshold
+    ch_sort_bam = SORT_BAM.out.ch_sort_bam 
+                      | filter { sample, single_end, bam, flagstat -> check_mapped(sample, flagstat, params.min_mapped_reads) } 
+                      | map { it[0..2] }
+    
+               
 
     /*
     * STEP 5.3: Trim amplicon sequences with iVar
     */
+    
     if (params.protocol == 'amplicon'){
-        ch_sort_bam = SORT_BAM.out.ch_sort_bam | map {it[0..2]}
         IVAR_TRIM(ch_sort_bam, ch_amplicon_bed)
+
+        ivar_trim_flagstat_mqc = IVAR_TRIM.out.ch_ivar_trim_flagstat_mqc
+        ivar_trim_log_mqc = IVAR_TRIM.out.ch_ivar_trim_log_mqc
     }
+    else {
+        ivar_trim_flagstat_mqc = Channel.empty()
+        ivar_trim_log_mqc = Channel.empty()
+    }
+
 
     /*
     * STEP 5.4: Picard MarkDuplicates
     */
-    ch_picard_markduplicates = IVAR_TRIM.out.ch_ivar_trim_bam.combine(ch_fasta)
-    ch_picard_markduplicates | PICARD_MARKDUPLICATES
+    if (!params.skip_markduplicates){
+        if (params.protocol == 'amplicon'){
+            ch_picard_markduplicates = IVAR_TRIM.out.ch_ivar_trim_bam.combine(ch_fasta)
+            ch_picard_markduplicates | PICARD_MARKDUPLICATES
+            ch_bam = PICARD_MARKDUPLICATES.out.ch_markdup_bam
+        }
+        else{
+            ch_picard_markduplicates = ch_sort_bam.combine(ch_fasta)
+            ch_picard_markduplicates | PICARD_MARKDUPLICATES
+            ch_bam = PICARD_MARKDUPLICATES.out.ch_markdup_bam
+        }  
+        markdup_bam_flagstat_mqc = PICARD_MARKDUPLICATES.out.ch_markdup_bam_flagstat_mqc
+        markdup_bam_metrics_mqc = PICARD_MARKDUPLICATES.out.ch_markdup_bam_metrics_mqc
+    }
+    else{
+        if (params.protocol == 'amplicon'){
+            ch_bam = IVAR_TRIM.out.ch_ivar_trim_bam
+        }
+        else{
+            ch_bam = ch_sort_bam
+        }
+        markdup_bam_flagstat_mqc = Channel.empty()
+        markdup_bam_metrics_mqc = Channel.empty()
+    }
+    
 
     /*
     * STEP 5.5: Picard CollectMultipleMetrics and CollectWgsMetrics
     */
-    ch_picard_metrics = PICARD_MARKDUPLICATES.out.ch_markdup_bam.combine(ch_fasta)
+
+    ch_picard_metrics = ch_bam.combine(ch_fasta)
     ch_picard_metrics | PICARD_METRICS
 
     /*
     * STEP 5.6.1: mosdepth genome-wide coverage
     */
-    PICARD_MARKDUPLICATES.out.ch_markdup_bam | MOSDEPTH_GENOME
+
+    ch_bam | MOSDEPTH_GENOME
 
     /*
     * STEP 5.6.2: mosdepth amplicon coverage and plots
@@ -497,7 +540,7 @@ workflow {
 
     if (params.protocol == 'amplicon') {
 
-        MOSDEPTH_AMPLICON(PICARD_MARKDUPLICATES.out.ch_markdup_bam, ch_amplicon_bed)
+        MOSDEPTH_AMPLICON(ch_bam, ch_amplicon_bed)
 
         MOSDEPTH_AMPLICON.out.ch_mosdepth_amplicon_region_bed.collect() | MOSDEPTH_AMPLICON_PLOT
     }
@@ -509,7 +552,7 @@ workflow {
     /*
     * STEP 5.7: Create mpileup file for all variant callers
     */
-    ch_samtools_mpileup  = PICARD_MARKDUPLICATES.out.ch_markdup_bam.combine(ch_fasta)
+    ch_samtools_mpileup  = ch_bam.combine(ch_fasta)
     ch_samtools_mpileup | SAMTOOLS_MPILEUP
 
     /*
@@ -524,7 +567,7 @@ workflow {
         /*
         * STEP 5.7.1.1: Genome consensus generation with BCFtools and masked with BEDTools
         */
-        ch_varscan2_consensus_input = PICARD_MARKDUPLICATES.out.ch_markdup_bam.join(VARSCAN2.out.ch_varscan2_highfreq, by: [0,1]).combine(ch_fasta)
+        ch_varscan2_consensus_input = ch_bam.join(VARSCAN2.out.ch_varscan2_highfreq, by: [0,1]).combine(ch_fasta)
         ch_varscan2_consensus_input | VARSCAN2_CONSENSUS
 
         /*
@@ -566,7 +609,6 @@ workflow {
         ch_ivar_consensus_input = SAMTOOLS_MPILEUP.out.ch_mpileup.combine(ch_fasta)
         IVAR_CONSENSUS(ch_ivar_consensus_input)
 
-
         /*
         * STEP 5.7.2.2: iVar variant calling annotation with SnpEff and SnpSift
         */
@@ -580,7 +622,7 @@ workflow {
         */
         if(!params.skip_variants_quast){
 
-            IVAR_QUAST(IVAR_CONSENSUS.out.ch_ivar_consensus.collect{ it[2]}, ch_fasta, ch_gff)
+            IVAR_QUAST(IVAR_CONSENSUS.out.ch_ivar_consensus.collect{ it[2] }, ch_fasta, ch_gff)
         }
 
     }
@@ -595,12 +637,12 @@ workflow {
         /*
         * STEP 5.7.3: Variant calling with BCFTools
         */
-        BCFTOOLS_VARIANTS(PICARD_MARKDUPLICATES.out.ch_markdup_bam.combine(ch_fasta))
+        BCFTOOLS_VARIANTS(ch_bam.combine(ch_fasta))
 
         /*
         * STEP 5.7.3.1: Genome consensus generation with BCFtools and masked with BEDTools
         */
-        BCFTOOLS_CONSENSUS(PICARD_MARKDUPLICATES.out.ch_markdup_bam.join(BCFTOOLS_VARIANTS.out.ch_bcftools_variants, by: [0,1]).combine(ch_fasta), index_base)
+        BCFTOOLS_CONSENSUS(ch_bam.join(BCFTOOLS_VARIANTS.out.ch_bcftools_variants, by: [0,1]).combine(ch_fasta), index_base)
 
         /*
         * STEP 5.7.3.2: BCFTools variant calling annotation with SnpEff and SnpSift
@@ -630,6 +672,322 @@ workflow {
         ch_intersect_ivar_bcf | BCFTOOLS_ISEC
     }
    
+    ///////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////
+    /* --                                                                     -- */
+    /* --                    DENOVO ASSEMBLY PROCESSES                        -- */
+    /* --                                                                     -- */
+    ///////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////
+
+    /*
+    * PREPROCESSING: Build Blast database for viral genome
+    */
+    if (!params.skip_assembly && !params.skip_blast) {
+
+        ch_fasta | MAKE_BLAST_DB
+
+    }
+
+    /*
+    * PREPROCESSING: Build Kraken2 database for host genome
+    */
+    if (!isOffline()) {
+        if (!params.skip_kraken2 && !params.kraken2_db) {
+
+            if (!params.kraken2_db_name) { 
+                exit 1, "Please specify a valid name to build Kraken2 database for host e.g. 'human'!" 
+            }
+
+            if(!params.skip_assembly) {
+                KRAKEN2_BUILD()
+            }
+        }
+    } else {
+        exit 1, "NXF_OFFLINE=true or -offline has been set so cannot download files required to build Kraken2 database!"
+    }
+
+    /*
+    * STEP 6.1: Amplicon trimming with Cutadapt
+    */
+    if (params.protocol == 'amplicon' && !params.skip_assembly && !params.skip_amplicon_trimming){
+
+        CUTADAPT(FASTP.out.ch_fastp, ch_amplicon_fasta)
+        cutadapt_mqc = CUTADAPT.out.ch_cutadapt_mqc
+        cutadapt_fastqc_mqc = CUTADAPT.out.ch_cutadapt_fastqc_mqc
+    }
+    else{
+        cutadapt_mqc = Channel.empty()
+        cutadapt_fastqc_mqc = Channel.empty()
+    }
+
+    /*
+    * STEP 6.2: Filter reads with Kraken2
+    */
+    if (!params.skip_kraken2 && !params.skip_assembly){
+        if (params.protocol == 'amplicon'){
+            KRAKEN2(CUTADAPT.out.ch_cutadapt_kraken2.combine(ch_kraken2_db))
+        }
+        else{
+            if (!params.skip_adapter_trimming){
+                KRAKEN2(FASTP.out.ch_fastp.combine(ch_kraken2_db))
+            }
+            else{
+                KRAKEN2(CAT_FASTQ.out.ch_cat_fastq.combine(ch_kraken2_db))
+            } 
+        }
+        kraken2_report_mqc = KRAKEN2.out.ch_kraken2_report_mqc
+    }
+    else{
+        kraken2_report_mqc = Channel.empty()
+    }
+    ////////////////////////////////////////////////////
+    /* --                SPADES                    -- */
+    ////////////////////////////////////////////////////
+
+    if (!params.skip_assembly && 'spades' in assemblers) {
+        /*
+        * STEP 6.3: De novo assembly with SPAdes
+        */
+        if (!params.skip_kraken2 ){
+            SPADES(KRAKEN2.out.ch_kraken2)
+        }
+        else {
+            if (!params.skip_adapter_trimming) {
+                SPADES(FASTP.out.ch_fastp)
+            }
+            else {
+                SPADES(CAT_FASTQ.out.ch_cat_fastq)
+            }
+        }  
+
+        /*
+        * STEP 6.3.1: Run Blast on SPAdes de novo assembly
+        */
+        if(!params.skip_blast){
+            SPADES_BLAST(SPADES.out.ch_spades.combine(MAKE_BLAST_DB.out.ch_blast_db),ch_blast_outfmt6_header,fasta_base)
+        }
+
+        /*
+        * STEP 6.3.2: Run ABACAS on SPAdes de novo assembly
+        */
+        if (!params.skip_abacas){
+            SPADES_ABACAS(SPADES.out.ch_spades.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.3: Run PlasmidID on SPAdes de novo assembly
+        */
+        if (!params.skip_assembly && 'spades' in assemblers && !params.skip_plasmidid){
+            ch_spades_plasmidid_input = SPADES.out.ch_spades.filter { it.size() > 0 }
+            SPADES_PLASMIDID(ch_spades_plasmidid_input.combine(ch_fasta))
+        }
+        
+        /*
+        * STEP 6.3.4: Run Quast on SPAdes de novo assembly
+        */
+        if (!params.skip_assembly_quast){
+            SPADES_QUAST(SPADES.out.ch_spades.collect{ it[2] },ch_fasta, ch_gff)
+        }
+
+        /*
+        * STEP 6.3.5: Overlap scaffolds with Minimap2, induce and polish assembly, and call variants with seqwish and vg
+        */
+
+        if (!params.skip_vg){
+            SPADES_VG(SPADES.out.ch_spades.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.6: Variant annotation with SnpEff and SnpSift
+        */
+
+        if (!params.skip_vg && params.gff && !params.skip_snpeff){
+            SPADES_SNPEFF(SPADES_VG.out.ch_spades_vg_vcf.combine(MAKE_SNPEFF_DB.out.ch_snpeff_db), index_base)
+        }
+    }
+
+
+
+
+    ////////////////////////////////////////////////////
+    /* --               METASPADES                 -- */
+    ////////////////////////////////////////////////////
+
+    /*
+    * STEP 6.3: De novo assembly with MetaSPAdes
+    */
+    
+    if (!params.skip_assembly && 'metaspades' in assemblers){
+
+        // filter single_end reads , keep paired end reads
+        ch_metaspades_input = KRAKEN2.out.ch_kraken2.filter { it[1] == false} // filter single_end reads
+        
+        /*
+        * STEP 6.3: De novo assembly with MetaSPAdes
+        */
+
+        METASPADES(ch_metaspades_input)
+
+        /*
+        * STEP 6.3.1: Run Blast on MetaSPAdes de novo assembly
+        */
+        if(!params.skip_blast){
+            METASPADES_BLAST(METASPADES.out.ch_metaspades.combine(MAKE_BLAST_DB.out.ch_blast_db), ch_blast_outfmt6_header, fasta_base)
+        }
+
+        /*
+        * STEP 6.3.2: Run ABACAS on MetaSPAdes de novo assembly
+        */
+
+        if (!params.skip_abacas){
+            METASPADES_ABACAS(METASPADES.out.ch_metaspades.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.3: Run PlasmidID on MetaSPAdes de novo assembly
+        */
+
+        if(!params.skip_plasmidid){
+            METASPADES_PLASMIDID(METASPADES.out.ch_metaspades.filter { it.size() > 0 }.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.4: Run Quast on MetaSPAdes de novo assembly
+        */
+        if (!params.skip_assembly_quast){
+            METASPADES_QUAST(METASPADES.out.ch_metaspades.collect{ it[2] }, ch_fasta, ch_gff)
+        }
+
+        /*
+        * STEP 6.3.5: Overlap scaffolds with Minimap2, induce and polish assembly, and call variants with seqwish and vg
+        */
+
+        if (!params.skip_vg){
+            METASPADES_VG(METASPADES.out.ch_metaspades.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.6: Variant annotation with SnpEff and SnpSift
+        */
+        if(!params.skip_vg && params.gff && !params.skip_snpeff){
+            METASPADES_SNPEFF(METASPADES_VG.out.ch_metaspades_vg_vcf.combine(MAKE_SNPEFF_DB.out.ch_snpeff_db), index_base)
+        }
+    }
+
+
+    ////////////////////////////////////////////////////
+    /* --               UNICYCLER                  -- */
+    ////////////////////////////////////////////////////
+
+    if (!params.skip_assembly && 'unicycler' in assemblers){
+        
+        /*
+        * STEP 6.3: De novo assembly with Unicycler
+        */
+        UNICYCLER(KRAKEN2.out.ch_kraken2)
+
+        /*
+        * STEP 6.3.1: Run Blast on MetaSPAdes de novo assembly
+        */
+        if (!params.skip_blast){
+            UNICYCLER_BLAST(UNICYCLER.out.ch_unicycler.combine(MAKE_BLAST_DB.out.ch_blast_db),ch_blast_outfmt6_header, fasta_base)
+        }
+
+        /*
+        * STEP 6.3.2: Run ABACAS on Unicycler de novo assembly
+        */
+        if (!params.skip_abacas){
+            UNICYCLER_ABACAS(UNICYCLER.out.ch_unicycler.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.3: Run PlasmidID on Unicycler de novo assembly
+        */
+        if (!params.skip_plasmidid){
+            UNICYCLER_PLASMIDID(UNICYCLER.out.ch_unicycler.filter { it.size() > 0 }.combine(ch_fasta))
+        }
+        /*
+        * STEP 6.3.4: Run Quast on Unicycler de novo assembly
+        */
+        
+        if(!params.skip_assembly_quast){
+            UNICYCLER_QUAST(UNICYCLER.out.ch_unicycler.collect{ it[2] }, ch_fasta, ch_gff)
+        }
+
+        /*
+        * STEP 6.3.5: Overlap scaffolds with Minimap2, induce and polish assembly, and call variants with seqwish and vg
+        */
+        if(!params.skip_vg){
+            UNICYCLER_VG(UNICYCLER.out.ch_unicycler.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.6: Variant annotation with SnpEff and SnpSift
+        */
+
+        if(!params.skip_vg && params.gff && !params.skip_snpeff){
+            UNICYCLER_SNPEFF(UNICYCLER_VG.out.ch_unicycler_vg_vcf.combine(MAKE_SNPEFF_DB.out.ch_snpeff_db), index_base)
+        }
+    }
+            
+    ////////////////////////////////////////////////////
+    /* --                MINIA                     -- */
+    ////////////////////////////////////////////////////
+
+    if (!params.skip_assembly && 'minia' in assemblers){
+        /*
+        * STEP 6.3: De novo assembly with minia
+        */
+        MINIA(KRAKEN2.out.ch_kraken2)
+
+        /*
+        * STEP 6.3.1: Run Blast on minia de novo assembly
+        */
+        if(!params.skip_blast){
+            MINIA_BLAST(MINIA.out.ch_minia.combine(MAKE_BLAST_DB.out.ch_blast_db),ch_blast_outfmt6_header, fasta_base)
+        }
+
+        /*
+        * STEP 6.3.2: Run ABACAS on minia de novo assembly
+        */
+
+        if (!params.skip_abacas) {
+            MINIA_ABACAS(MINIA.out.ch_minia.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.3: Run PlasmidID on minia de novo assembly
+        */
+        if(!params.skip_plasmidid){
+            MINIA_PLASMIDID(MINIA.out.ch_minia.filter { it.size() > 0 }.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.4: Run Quast on minia de novo assembly
+        */
+
+        if (!params.skip_assembly_quast){
+           MINIA_QUAST(MINIA.out.ch_minia.collect{ it[2] }, ch_fasta, ch_gff) 
+        }
+
+        /*
+        * STEP 6.3.5: Overlap scaffolds with Minimap2, induce and polish assembly, and call variants with seqwish and vg
+        */
+        if(!params.skip_vg){
+            MINIA_VG(MINIA.out.ch_minia.combine(ch_fasta))
+        }
+
+        /*
+        * STEP 6.3.6: Variant annotation with SnpEff and SnpSift
+        */
+
+        if(!params.skip_vg && params.gff && !params.skip_snpeff){
+            MINIA_SNPEFF(MINIA_VG.out.ch_minia_vg_vcf.combine(MAKE_SNPEFF_DB.out.ch_snpeff_db), index_base)
+        }
+
+
+    }
 
     ///////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////
@@ -638,6 +996,7 @@ workflow {
     /* --                                                                     -- */
     ///////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////
+
     Channel.from(summary.collect{ [it.key, it.value] })
         .map { k,v -> "<dt>$k</dt><dd><samp>${v ?: '<span style=\"color:#999999;\">N/A</a>'}</samp></dd>" }
         .reduce { a, b -> return [a, b].join("\n            ") }
@@ -656,6 +1015,7 @@ workflow {
 
     
     get_software_versions()
+    
     if (!params.skip_multiqc) {
         MULTIQC(
             custom_runName,
@@ -666,10 +1026,10 @@ workflow {
             FASTP.out.ch_fastp_fastqc_mqc.collect().ifEmpty([]),
             BOWTIE2.out.ch_bowtie2_mqc.collect().ifEmpty([]),
             SORT_BAM.out.ch_sort_bam_flagstat_mqc.collect().ifEmpty([]),
-            IVAR_TRIM.out.ch_ivar_trim_flagstat_mqc.collect().ifEmpty([]),
-            IVAR_TRIM.out.ch_ivar_trim_log_mqc.collect().ifEmpty([]),
-            PICARD_MARKDUPLICATES.out.ch_markdup_bam_flagstat_mqc.collect().ifEmpty([]),
-            PICARD_MARKDUPLICATES.out.ch_markdup_bam_metrics_mqc.collect().ifEmpty([]),
+            ivar_trim_flagstat_mqc.collect().ifEmpty([]),
+            ivar_trim_log_mqc.collect().ifEmpty([]),
+            markdup_bam_flagstat_mqc.collect().ifEmpty([]),
+            markdup_bam_metrics_mqc.collect().ifEmpty([]),
             PICARD_METRICS.out.ch_picard_metrics_mqc.collect().ifEmpty([]),
             MOSDEPTH_GENOME.out.ch_mosdepth_genome_mqc.collect().ifEmpty([]),
             VARSCAN2.out.ch_varscan2_log_mqc.collect().ifEmpty([]),
@@ -682,8 +1042,26 @@ workflow {
             IVAR_QUAST.out.ch_ivar_quast_mqc.collect().ifEmpty([]),
             BCFTOOLS_VARIANTS.out.ch_bcftools_variants_mqc.collect().ifEmpty([]),
             BCFTOOLS_SNPEFF.out.ch_bcftools_snpeff_mqc.collect().ifEmpty([]),
-            BCFTOOLS_QUAST.out.ch_bcftools_quast_mqc.collect().ifEmpty([])
+            BCFTOOLS_QUAST.out.ch_bcftools_quast_mqc.collect().ifEmpty([]),
+            cutadapt_mqc.collect().ifEmpty([]),
+            cutadapt_fastqc_mqc.collect().ifEmpty([]),
+            kraken2_report_mqc.collect().ifEmpty([]),
+            SPADES_VG.out.ch_spades_vg_bcftools_mqc.collect().ifEmpty([]),
+            SPADES_SNPEFF.out.ch_spades_snpeff_mqc.collect().ifEmpty([]),
+            SPADES_QUAST.out.ch_quast_spades_mqc.collect().ifEmpty([]),
+            METASPADES_VG.out.ch_metaspades_vg_bcftools_mqc.collect().ifEmpty([]),
+            METASPADES_SNPEFF.out.ch_metaspades_snpeff_mqc.collect().ifEmpty([]),
+            METASPADES_QUAST.out.ch_quast_metaspades_mqc.collect().ifEmpty([]),
+            UNICYCLER_VG.out.ch_unicycler_vg_bcftools_mqc.collect().ifEmpty([]),
+            UNICYCLER_SNPEFF.out.ch_unicycler_snpeff_mqc.collect().ifEmpty([]),
+            UNICYCLER_QUAST.out.ch_quast_unicycler_mqc.collect().ifEmpty([]),
+            MINIA_VG.out.ch_minia_vg_bcftools_mqc.collect().ifEmpty([]),
+            MINIA_SNPEFF.out.ch_minia_snpeff_mqc.collect().ifEmpty([]),
+            MINIA_QUAST.out.ch_quast_minia_mqc.collect().ifEmpty([]),
+            get_software_versions.out.ch_software_versions_yaml.collect(),
+            ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
         )
     }
+    
     output_documentation(ch_output_docs,ch_output_docs_images)
 }

@@ -1,38 +1,37 @@
-process SPADES {
+process UNICYCLER {
     tag "$sample"
     label 'process_high'
     label 'error_ignore'
-    publishDir "${params.outdir}/assembly/spades", mode: params.publish_dir_mode,
-        saveAs: { filename ->
-                      if (filename.endsWith(".png")) "bandage/$filename"
-                      else if (filename.endsWith(".svg")) "bandage/$filename"
-                      else filename
-                }
+    publishDir "${params.outdir}/assembly/unicycler", mode: params.publish_dir_mode,
+    saveAs: { filename ->
+                  if (filename.endsWith(".png")) "bandage/$filename"
+                  else if (filename.endsWith(".svg")) "bandage/$filename"
+                  else filename
+            }
 
     //when:
-    //!params.skip_assembly && 'spades' in assemblers
+    //!params.skip_assembly && 'unicycler' in assemblers
 
     input:
-    tuple val(sample), val(single_end), path(reads)/* from ch_kraken2_spades*/
+    tuple val(sample), val(single_end), path(reads) //from ch_kraken2_unicycler
 
     output:
-    tuple val(sample), val(single_end), path("*scaffolds.fa"), emit: ch_spades /*into ch_spades_blast,
-                                                                   ch_spades_abacas,
-                                                                   ch_spades_plasmidid,
-                                                                   ch_spades_quast,
-                                                                   ch_spades_vg*/
+    tuple val(sample), val(single_end), path("*scaffolds.fa"), emit:  ch_unicycler /*into ch_unicycler_blast,
+                                                                   ch_unicycler_abacas,
+                                                                   ch_unicycler_plasmidid,
+                                                                   ch_unicycler_quast,
+                                                                   ch_unicycler_vg */
     path "*assembly.{gfa,png,svg}"
-
 
     script:
     input_reads = single_end ? "-s $reads" : "-1 ${reads[0]} -2 ${reads[1]}"
     """
-    spades.py \\
+    unicycler \\
         --threads $task.cpus \\
         $input_reads \\
-        -o ./
-    mv scaffolds.fasta ${sample}.scaffolds.fa
-    mv assembly_graph_with_scaffolds.gfa ${sample}.assembly.gfa
+        --out ./
+    mv assembly.fasta ${sample}.scaffolds.fa
+    mv assembly.gfa ${sample}.assembly.gfa
     if [ -s ${sample}.assembly.gfa ]
     then
         Bandage image ${sample}.assembly.gfa ${sample}.assembly.png --height 1000
@@ -41,19 +40,19 @@ process SPADES {
     """
 }
 
-process SPADES_BLAST {
+process UNICYCLER_BLAST {
     tag "$sample"
     label 'process_medium'
     label 'error_ignore'
-    publishDir "${params.outdir}/assembly/spades/blast", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/unicycler/blast", mode: params.publish_dir_mode
 
     //when:
-    //!params.skip_assembly && 'spades' in assemblers && !params.skip_blast
+    //!params.skip_assembly && 'unicycler' in assemblers && !params.skip_blast
 
     input:
-    tuple val(sample), val(single_end), path(scaffold), path (db)/* from ch_spades_blast */
-    /* path db rom ch_blast_db */
-    path header /*from ch_blast_outfmt6_header*/
+    tuple val(sample), val(single_end), path(scaffold), path (db) // from ch_unicycler_blast
+    ///path db from ch_blast_db
+    path header //from ch_blast_outfmt6_header
     val (fasta_base)
 
     output:
@@ -72,22 +71,22 @@ process SPADES_BLAST {
     """
 }
 
-process SPADES_ABACAS {
+process UNICYCLER_ABACAS {
     tag "$sample"
     label 'process_medium'
     label 'error_ignore'
-    publishDir "${params.outdir}/assembly/spades/abacas", mode: params.publish_dir_mode,
+    publishDir "${params.outdir}/assembly/unicycler/abacas", mode: params.publish_dir_mode,
         saveAs: { filename ->
                       if (filename.indexOf("nucmer") > 0) "nucmer/$filename"
                       else filename
                 }
 
-    //when:
-    //!params.skip_assembly && 'spades' in assemblers && !params.skip_abacas
+   // when:
+    //!params.skip_assembly && 'unicycler' in assemblers && !params.skip_abacas
 
     input:
-    tuple val(sample), val(single_end), path(scaffold), path(fasta) /*from ch_spades_abacas */
-    /*path fasta from ch_fasta*/
+    tuple val(sample), val(single_end), path(scaffold), path (fasta) //from ch_unicycler_abacas
+    //path fasta from ch_fasta
 
     output:
     path "*.abacas*"
@@ -102,18 +101,18 @@ process SPADES_ABACAS {
     """
 }
 
-process SPADES_PLASMIDID {
+process UNICYCLER_PLASMIDID {
     tag "$sample"
     label 'process_medium'
     label 'error_ignore'
-    publishDir "${params.outdir}/assembly/spades/plasmidid", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/unicycler/plasmidid", mode: params.publish_dir_mode
 
     //when:
-    //!params.skip_assembly && 'spades' in assemblers && !params.skip_plasmidid
+    //!params.skip_assembly && 'unicycler' in assemblers && !params.skip_plasmidid
 
     input:
-    tuple val(sample), val(single_end), path(scaffold), path (fasta) //from ch_spades_plasmidid.filter { it.size() > 0 }
-    //from ch_fasta
+    tuple val(sample), val(single_end), path(scaffold), path (fasta) //from ch_unicycler_plasmidid.filter { it.size() > 0 }
+   // path fasta from ch_fasta
 
     output:
     path "$sample"
@@ -125,25 +124,25 @@ process SPADES_PLASMIDID {
     """
 }
 
-process SPADES_QUAST {
+process UNICYCLER_QUAST {
     label 'process_medium'
     label 'error_ignore'
-    publishDir "${params.outdir}/assembly/spades", mode: params.publish_dir_mode,
+    publishDir "${params.outdir}/assembly/unicycler", mode: params.publish_dir_mode,
         saveAs: { filename ->
                       if (!filename.endsWith(".tsv")) filename
                 }
 
     //when:
-    //!params.skip_assembly && 'spades' in assemblers && !params.skip_assembly_quast
+    //!params.skip_assembly && 'unicycler' in assemblers && !params.skip_assembly_quast
 
     input:
-    path scaffolds //from ch_spades_quast.collect{ it[2] }
-    path fasta //from ch_fasta
-    path gff //from ch_gff
+    path scaffolds //from ch_unicycler_quast.collect{ it[2] }
+    path fasta// from ch_fasta
+    path gff// from ch_gff
 
     output:
     path "quast"
-    path "report.tsv", emit: ch_quast_spades_mqc
+    path "report.tsv", emit: ch_quast_unicycler_mqc
 
     script:
     features = params.gff ? "--features $gff" : ""
@@ -158,11 +157,11 @@ process SPADES_QUAST {
     """
 }
 
-process SPADES_VG {
+process UNICYCLER_VG {
     tag "$sample"
     label 'process_medium'
     label 'error_ignore'
-    publishDir "${params.outdir}/assembly/spades/variants", mode: params.publish_dir_mode,
+    publishDir "${params.outdir}/assembly/unicycler/variants", mode: params.publish_dir_mode,
         saveAs: { filename ->
                       if (filename.endsWith(".txt")) "bcftools_stats/$filename"
                       else if (filename.endsWith(".png")) "bandage/$filename"
@@ -171,15 +170,15 @@ process SPADES_VG {
                 }
 
     //when:
-    //!params.skip_assembly && 'spades' in assemblers && !params.skip_vg
+   // !params.skip_assembly && 'unicycler' in assemblers && !params.skip_vg
 
     input:
-    tuple val(sample), val(single_end), path(scaffolds), path (fasta) //from ch_spades_vg
-    //path fasta from ch_fasta
+    tuple val(sample), val(single_end), path(scaffolds), path (fasta) // from ch_unicycler_vg
+   // path fasta from ch_fasta
 
     output:
-    tuple val(sample), val(single_end), path("${sample}.vcf.gz*"), emit:  ch_spades_vg_vcf
-    path "*.bcftools_stats.txt", emit: ch_spades_vg_bcftools_mqc
+    tuple val(sample), val(single_end), path("${sample}.vcf.gz*"), emit: ch_unicycler_vg_vcf
+    path "*.bcftools_stats.txt", emit: ch_unicycler_vg_bcftools_mqc
     path "*.{gfa,png,svg}"
 
     script:
@@ -208,22 +207,22 @@ process SPADES_VG {
     """
 }
 
-process SPADES_SNPEFF {
+process UNICYCLER_SNPEFF {
     tag "$sample"
     label 'process_medium'
     label 'error_ignore'
-    publishDir "${params.outdir}/assembly/spades/variants/snpeff", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/assembly/unicycler/variants/snpeff", mode: params.publish_dir_mode
 
     //when:
-    //!params.skip_assembly && 'spades' in assemblers && !params.skip_vg && params.gff && !params.skip_snpeff
+    //!params.skip_assembly && 'unicycler' in assemblers && !params.skip_vg && params.gff && !params.skip_snpeff
 
     input:
-    tuple val(sample), val(single_end), path(vcf),file(db), file(config) //from ch_spades_vg_vcf
-    //tuple file(db), file(config) //from ch_snpeff_db_spades
+    tuple val(sample), val(single_end), path(vcf),file(db), file(config)// from ch_unicycler_vg_vcf
+    //tuple file(db), file(config) from ch_snpeff_db_unicycler
     val (index_base)
 
     output:
-    path "*.snpEff.csv", emit: ch_spades_snpeff_mqc
+    path "*.snpEff.csv", emit: ch_unicycler_snpeff_mqc
     path "*.vcf.gz*"
     path "*.{txt,html}"
 

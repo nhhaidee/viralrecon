@@ -6,8 +6,8 @@ process get_software_versions {
                 }
 
     output:
-    path "software_versions_mqc.yaml", emit: software_versions_yaml
-    path "software_versions.csv", emit: software_version_csv
+    path "software_versions_mqc.yaml", emit: ch_software_versions_yaml
+    path "software_versions.csv", emit: ch_software_version_csv
 
     script:
     """

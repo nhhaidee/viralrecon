@@ -73,10 +73,10 @@ process CHECK_SAMPLESHEET {
                 }
 
     input:
-    path samplesheet
+    path samplesheet// from ch_input
 
     output:
-    path "samplesheet.valid.csv"/* into ch_samplesheet_reformat, emit: samplesheet_results*/
+    path "samplesheet.valid.csv"//, emit: ch_samplesheet_reformat
     //path "sra_run_info.tsv" optional true
 
     script:  // These scripts are bundled with the pipeline, in nf-core/viralrecon/bin/
@@ -84,14 +84,12 @@ process CHECK_SAMPLESHEET {
     """
     awk -F, '{if(\$1 != "" && \$2 != "") {print \$0}}' $samplesheet > nonsra_id.csv
     check_samplesheet.py nonsra_id.csv nonsra.samplesheet.csv
-
     awk -F, '{if(\$1 != "" && \$2 == "" && \$3 == "") {print \$1}}' $samplesheet > sra_id.list
     if $run_sra && [ -s sra_id.list ]
     then
         fetch_sra_runinfo.py sra_id.list sra_run_info.tsv --platform ILLUMINA --library_layout SINGLE,PAIRED
         sra_runinfo_to_samplesheet.py sra_run_info.tsv sra.samplesheet.csv
     fi
-
     if [ -f nonsra.samplesheet.csv ]
     then
         head -n 1 nonsra.samplesheet.csv > samplesheet.valid.csv

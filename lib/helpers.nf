@@ -201,3 +201,30 @@ def isOffline() {
     }
 }
 
+def get_mapped_from_flagstat(flagstat) {
+    def mapped = 0
+    flagstat.eachLine { line ->
+        if (line.contains(' mapped (')) {
+            mapped = line.tokenize().first().toInteger()
+        }
+    }
+    return mapped
+}
+
+def check_mapped(sample, flagstat, min_mapped_reads) {
+    pass_mapped_reads = [:]
+    fail_mapped_reads = [:]
+    mapped = get_mapped_from_flagstat(flagstat)
+    c_reset = params.monochrome_logs ? '' : "\033[0m";
+    c_green = params.monochrome_logs ? '' : "\033[0;32m";
+    c_red = params.monochrome_logs ? '' : "\033[0;31m";
+    if (mapped < min_mapped_reads.toInteger()) {
+        log.info ">${c_red}>>>> $sample FAILED MAPPED READ THRESHOLD: ${mapped} < ${params.min_mapped_reads}. IGNORING FOR FURTHER DOWNSTREAM ANALYSIS! <<<<${c_reset}<"
+        fail_mapped_reads[sample] = mapped
+        return false
+    } else {
+        //log.info "-${c_green}           Passed mapped read threshold > bowtie2 ($sample)   >> ${mapped} <<${c_reset}"
+        pass_mapped_reads[sample] = mapped
+        return true
+    }
+}

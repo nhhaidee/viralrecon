@@ -1,3 +1,27 @@
+
+process KRAKEN2_BUILD {
+    tag "$db"
+    label 'process_high'
+    if (params.save_reference) {
+        publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+    }
+
+    //when:
+    //!params.skip_assembly
+
+    output:
+    path "$db", emit: ch_kraken2_db
+
+    script:
+    db = "kraken2_${params.kraken2_db_name}"
+    ftp = params.kraken2_use_ftp ? "--use-ftp" : ""
+    """
+    kraken2-build --db $db --threads $task.cpus $ftp --download-taxonomy
+    kraken2-build --db $db --threads $task.cpus $ftp --download-library $params.kraken2_db_name
+    kraken2-build --db $db --threads $task.cpus $ftp --build
+    """
+}
+
 process KRAKEN2 {
     tag "$db"
     label 'process_high'
@@ -8,15 +32,15 @@ process KRAKEN2 {
                 }
 
     input:
-    tuple val(sample), val(single_end), path(reads), path(db) /*from ch_fastp_kraken2*/
-    /*path db from ch_kraken2_db*/
+    tuple val(sample), val(single_end), path(reads), path(db) /* from ch_fastp_kraken2 */
+    /*path db from ch_kraken2_db */
 
     output:
-    tuple val(sample), val(single_end), path("*.viral*"), emit: ch_kraken2 /*into ch_kraken2_spades,
+    tuple val(sample), val(single_end), path("*.viral*"), emit: ch_kraken2 /* into ch_kraken2_spades,
                                                                 ch_kraken2_metaspades,
                                                                 ch_kraken2_unicycler,
                                                                 ch_kraken2_minia */
-    path "*.report.txt", emit:ch_kraken2_report_mqc
+    path "*.report.txt", emit: ch_kraken2_report_mqc
     path "*.host*"
 
 
